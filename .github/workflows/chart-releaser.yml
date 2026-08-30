@@ -26,6 +26,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Run Chart Releaser
         uses: helm/chart-releaser-action@v1
         env:
@@ -33,3 +38,4 @@ jobs:
         with:
           charts_dir: ./helm
           pages_branch: charts
+          skip_existing: true
