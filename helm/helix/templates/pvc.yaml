@@ -1,0 +1,83 @@
+{{- if and .Values.persistence.data.enabled (not .Values.persistence.data.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "helix.fullname" . }}-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helix.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.data.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.data.size | quote }}
+  {{- with .Values.persistence.data.storageClass }}
+  storageClassName: {{ . }}
+  {{- else }}
+  storageClassName: ""
+  {{- end }}
+{{- end }}
+{{- if and .Values.persistence.inboundYt.enabled (not .Values.persistence.inboundYt.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "helix.fullname" . }}-inbound-yt
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helix.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.inboundYt.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.inboundYt.size | quote }}
+  {{- with .Values.persistence.inboundYt.storageClass }}
+  storageClassName: {{ . }}
+  {{- else }}
+  storageClassName: ""
+  {{- end }}
+{{- end }}
+{{- if and .Values.persistence.music.enabled (not .Values.persistence.music.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "helix.fullname" . }}-music
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helix.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.music.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.music.size | quote }}
+  {{- with .Values.persistence.music.storageClass }}
+  storageClassName: {{ . }}
+  {{- else }}
+  storageClassName: ""
+  {{- end }}
+{{- end }}
+{{- if and .Values.persistence.customStations.enabled (not .Values.persistence.customStations.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "helix.fullname" . }}-custom-stations
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helix.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.customStations.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.customStations.size | quote }}
+  {{- with .Values.persistence.customStations.storageClass }}
+  storageClassName: {{ . }}
+  {{- else }}
+  storageClassName: ""
+  {{- end }}
+{{- end }}
