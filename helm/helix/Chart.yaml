@@ -2,7 +2,7 @@ apiVersion: v2
 name: helix
 description: Helm chart for Helix, a self-hosted music player, discovery tool, and shared listening system
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "latest"
 home: https://github.com/UnifiedKings/helix
 sources:
