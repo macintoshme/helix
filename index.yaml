@@ -1,0 +1,25 @@
+apiVersion: v1
+entries:
+  helix:
+  - apiVersion: v2
+    appVersion: latest
+    created: "2026-08-30T20:33:33.395347228Z"
+    description: Helm chart for Helix, a self-hosted music player, discovery tool,
+      and shared listening system
+    digest: 3fc99a73e137fc0a69833680a1e8e5e3b232110ec061d35b0ea8cb3ecf5afd12
+    home: https://github.com/UnifiedKings/helix
+    keywords:
+    - music
+    - subsonic
+    - navidrome
+    - shared-listening
+    maintainers:
+    - name: unifiedkings
+    name: helix
+    sources:
+    - https://github.com/UnifiedKings/helix
+    type: application
+    urls:
+    - https://github.com/macintoshme/helix/releases/download/helix-0.2.0/helix-0.2.0.tgz
+    version: 0.2.0
+generated: "2026-08-30T20:33:33.395354474Z"
