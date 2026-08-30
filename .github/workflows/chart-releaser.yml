@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run Chart Releaser
-        uses: stefanprodan/charts-releaser-action@v1
+        uses: helm/chart-releaser-action@v1.18.0
         with:
           chart_directories: |
             ./helm/helix
