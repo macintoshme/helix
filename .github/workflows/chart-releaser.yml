@@ -27,8 +27,9 @@ jobs:
           fetch-depth: 0
 
       - name: Run Chart Releaser
-        uses: helm/chart-releaser-action@v1.18.0
+        uses: helm/chart-releaser-action@v1
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          chart_directories: |
-            ./helm/helix
-          token: ${{ secrets.GITHUB_TOKEN }}
+          charts_dir: ./helm
+          pages_branch: charts
