@@ -1,0 +1,34 @@
+name: chart-releaser
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint ./helm/helix
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Chart Releaser
+        uses: stefanprodan/charts-releaser-action@v1
+        with:
+          chart_directories: |
+            ./helm/helix
+          token: ${{ secrets.GITHUB_TOKEN }}
