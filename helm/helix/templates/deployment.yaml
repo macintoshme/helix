@@ -1,0 +1,194 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helix.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helix.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  {{- if .Values.persistence.data.enabled }}
+  # /data holds the SQLite DB and is seeded by the entrypoint on first run,
+  # so a rolling update could race two pods on the same volume. Use Recreate
+  # unless your storage supports safe concurrent access.
+  {{- end }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "helix.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if not .Values.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "helix.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "helix.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ include "helix.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          {{- if .Values.probes.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+          env:
+            {{- $tuning := .Values.env.tuning }}
+            - name: HELIX_PREFETCH_AHEAD
+              value: {{ $tuning.prefetchAhead | quote }}
+            - name: HELIX_LOBBY_YT_LINK_MAX_ITEMS
+              value: {{ $tuning.lobbyYtLinkMaxItems | quote }}
+            - name: HELIX_ENABLE_API_DOCS
+              value: {{ $tuning.enableApiDocs | quote }}
+            - name: HELIX_ALLOW_NON_ADMIN_IMPORT
+              value: {{ $tuning.allowNonAdminImport | quote }}
+            - name: HELIX_ENABLE_CUSTOM_STATION_TYPES
+              value: {{ $tuning.enableCustomStationTypes | quote }}
+            - name: HELIX_CUSTOM_STATION_TYPES_DIR
+              value: {{ $tuning.customStationTypesDir | quote }}
+            - name: HELIX_DB_WATCHDOG_WARN_S
+              value: {{ $tuning.dbWatchdogWarnS | quote }}
+            - name: HELIX_DB_WATCHDOG_ERROR_S
+              value: {{ $tuning.dbWatchdogErrorS | quote }}
+            - name: HELIX_YTDLP_AUTO_UPDATE
+              value: {{ $tuning.ytdlpAutoUpdate | quote }}
+            - name: HELIX_YTDLP_CHANNEL
+              value: {{ $tuning.ytdlpChannel | quote }}
+            - name: HELIX_COOKIE_SECURE
+              value: {{ $tuning.cookieSecure | quote }}
+            - name: LISTENBRAINZ_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "helix.secretName" . }}
+                  key: LISTENBRAINZ_TOKEN
+            - name: SUBSONIC_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "helix.secretName" . }}
+                  key: SUBSONIC_BASE_URL
+            - name: SUBSONIC_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "helix.secretName" . }}
+                  key: SUBSONIC_USERNAME
+            - name: SUBSONIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "helix.secretName" . }}
+                  key: SUBSONIC_PASSWORD
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if .Values.persistence.inboundYt.enabled }}
+            - name: inbound-yt
+              mountPath: /inbound_yt
+            {{- end }}
+            {{- if .Values.persistence.music.enabled }}
+            - name: music
+              mountPath: /data/music
+            {{- end }}
+            {{- if .Values.persistence.customStations.enabled }}
+            - name: custom-stations
+              mountPath: /data/plugins/stations
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.data.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.data.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "helix.fullname" . }}-data
+          {{- end }}
+        {{- if .Values.persistence.inboundYt.enabled }}
+        - name: inbound-yt
+          {{- if .Values.persistence.inboundYt.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.inboundYt.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "helix.fullname" . }}-inbound-yt
+          {{- end }}
+        {{- end }}
+        {{- if .Values.persistence.music.enabled }}
+        - name: music
+          {{- if .Values.persistence.music.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.music.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "helix.fullname" . }}-music
+          {{- end }}
+        {{- end }}
+        {{- if .Values.persistence.customStations.enabled }}
+        - name: custom-stations
+          {{- if .Values.persistence.customStations.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.customStations.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "helix.fullname" . }}-custom-stations
+          {{- end }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

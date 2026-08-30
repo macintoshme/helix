@@ -1,0 +1,182 @@
+# Default values for the Helix chart.
+
+# Override the image, tag, or repository.
+image:
+  repository: ghcr.io/unifiedkings/helix
+  pullPolicy: IfNotPresent
+  tag: latest
+
+# Optional image pull secrets (private registries, etc.).
+imagePullSecrets: []
+
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+  targetPort: 8000
+  annotations: {}
+
+# Ingress for reaching the web UI / API.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host:
+    # Full host name, e.g. helix.example.com.
+    name: ""
+  path: /
+  pathType: Prefix
+  tls: []
+  # - secretName: helix-tls
+  #   hosts:
+  #     - helix.example.com
+
+# Kubernetes ServiceAccount used by the pod.
+serviceAccount:
+  create: false
+  annotations: {}
+  name: ""
+
+# Standard pod settings.
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context.
+# NOTE: the stock image runs as root (yt-dlp auto-update pip-installs into
+# system site-packages and deno lives in /root/.deno). Running non-root will
+# break yt-dlp auto-update; keep default or set HELIX_YTDLP_AUTO_UPDATE=false.
+podSecurityContext: {}
+  # runAsUser: 0
+  # fsGroup: 0
+securityContext: {}
+  # allowPrivilegeEscalation: false
+  # capabilities:
+  #   drop:
+  #     - ALL
+  # seccompProfile:
+  #   type: RuntimeDefault
+
+# Resource requests/limits.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Pod-level tolerations/affinity/node selector.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# PodDisruptionBudget to keep updates from causing downtime.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Liveness/readiness probes hit the built-in /health endpoint.
+probes:
+  enabled: true
+  liveness:
+    path: /health
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Persistent storage.
+# A PVC is created for /data. You can optionally mount your music library
+# into the container and provide beets config / custom stations.
+persistence:
+  # Main /data volume (database, stream cache, beets, plugins, logs).
+  data:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    # Provide an existing PVC name to reuse one.
+    existingClaim: ""
+    # Explicit /data subPath mounts are not needed when the whole volume
+    # is mounted at /data.
+  # Inbound download/fulfillment staging.
+  inboundYt:
+    enabled: false
+    size: 10Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    existingClaim: ""
+  # Optional music library root used by Navidrome/Subsonic/beets.
+  music:
+    enabled: false
+    size: 100Gi
+    storageClass: ""
+    accessModes:
+      - ReadOnlyMany
+    existingClaim: ""
+  # Optional custom station providers directory.
+  customStations:
+    enabled: false
+    size: 1Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    existingClaim: ""
+
+# Environment configuration.
+# Secrets are created for credentials and referenced via secretKeyRef.
+env:
+  listenbrainz:
+    # Set either via secret (recommended) or plain (not recommended).
+    token: ""
+  subsonic:
+    baseUrl: ""
+    username: ""
+    password: ""
+  # Plain (non-secret) tuning values. Empty = use the app default.
+  tuning:
+    prefetchAhead: "3"
+    lobbyYtLinkMaxItems: "100"
+    enableApiDocs: "false"
+    allowNonAdminImport: "false"
+    enableCustomStationTypes: "false"
+    customStationTypesDir: "/data/plugins/stations"
+    dbWatchdogWarnS: "2"
+    dbWatchdogErrorS: "10"
+    ytdlpAutoUpdate: "true"
+    ytdlpChannel: "stable"
+    # Keep true when served over HTTPS, false for plain HTTP access.
+    cookieSecure: "true"
+
+# Existing Secret containing the same keys as above, if you prefer to
+# manage credentials yourself. When set, the chart will not create its own.
+existingSecret: ""
+
+# Extra environment variables (raw, non-secret) added to the container.
+extraEnv: []
+# - name: EXAMPLE
+#   value: "value"
+
+# Extra raw volumes / volumeMounts for advanced use (e.g. a hostPath or
+# ConfigMap for a music library).
+extraVolumes: []
+# - name: music-hostpath
+#   hostPath:
+#     path: /mnt/music
+#     type: Directory
+extraVolumeMounts: []
+# - name: music-hostpath
+#   mountPath: /data/music
+#   readOnly: true

@@ -1,0 +1,32 @@
+1. Get the application URL by running these commands:
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.tls }}
+  https://{{ .Values.ingress.host.name }}
+{{- else }}
+  http://{{ .Values.ingress.host.name }}
+{{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_PORT=$(kubectl get -n {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "helix.fullname" . }})
+  export NODE_IP=$(kubectl get nodes -n {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+  NOTE: It may take a moment for the LoadBalancer IP to be available.
+  Watch with:  kubectl get svc -n {{ .Release.Namespace }} -w {{ include "helix.fullname" . }}
+
+  Once the external IP is known:
+  http://<EXTERNAL-IP>:{{ .Values.service.port }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "helix.fullname" . }} 8000:{{ .Values.service.port }}
+  Then open http://localhost:8000 in your browser.
+{{- end }}
+
+2. On first launch Helix asks you to create an admin account.
+
+3. If you configured a Subsonic/Navidrome server (SUBSONIC_* values),
+   library search/streaming/fulfillment will be available.
+
+{{- if ne (.Values.env.tuning.cookieSecure | toString) "true" }}
+
+NOTE: HELIX_COOKIE_SECURE is set to false. Only do this if you are
+accessing Helix over plain HTTP; set it back to true behind HTTPS.
+{{- end }}
