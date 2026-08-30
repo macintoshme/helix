@@ -14,8 +14,6 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  # GHCR image names must be lowercase.
-  IMAGE_NAME: ${{ toLower(github.repository) }}
 
 jobs:
   smoke-test:
@@ -72,10 +70,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR image names must be lowercase.
+      - id: repo
+        run: echo "name=$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
