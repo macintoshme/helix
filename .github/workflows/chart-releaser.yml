@@ -19,6 +19,16 @@ jobs:
       - name: Lint chart
         run: helm lint ./helm/helix
 
+      - name: Verify appVersion matches app
+        run: |
+          APP_VERSION=$(python3 -c "import json; print(json.load(open('frontend/package.json'))['version'])")
+          CHART_APP_VERSION=$(sed -nE 's/^appVersion: *"?([^"#"]+)"?.*$/\1/p' helm/helix/Chart.yaml)
+          if [ "$APP_VERSION" != "$CHART_APP_VERSION" ]; then
+            echo "::error::Chart appVersion ($CHART_APP_VERSION) does not match app version ($APP_VERSION)"
+            exit 1
+          fi
+          echo "appVersion matches: $APP_VERSION"
+
   release:
     runs-on: ubuntu-latest
     steps:
@@ -30,6 +40,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync appVersion from frontend/package.json
+        run: |
+          APP_VERSION=$(python3 -c "import json; print(json.load(open('frontend/package.json'))['version'])")
+          echo "Syncing chart appVersion to $APP_VERSION"
+          sed -i -E "s/^appVersion:.*$/appVersion: \"$APP_VERSION\"/" helm/helix/Chart.yaml
+          grep '^appVersion:' helm/helix/Chart.yaml
 
       - name: Run Chart Releaser
         uses: helm/chart-releaser-action@v1

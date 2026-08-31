@@ -2,8 +2,13 @@ apiVersion: v2
 name: helix
 description: Helm chart for Helix, a self-hosted music player, discovery tool, and shared listening system
 type: application
-version: 0.2.0
-appVersion: "latest"
+# version: chart semver, independent of the app. Bump major when the
+# values.yaml interface changes (breaking), minor for new chart features,
+# patch for fixes.
+version: 0.2.1
+# appVersion: the Helix app version. Auto-synced from frontend/package.json
+# by CI before packaging; do not set this to an image tag.
+appVersion: "0.1.0"
 home: https://github.com/UnifiedKings/helix
 sources:
   - https://github.com/UnifiedKings/helix
