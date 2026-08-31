@@ -193,6 +193,13 @@ services:
       HELIX_ENABLE_API_DOCS: "false"
       HELIX_ALLOW_NON_ADMIN_IMPORT: "false"
 
+      # Cross-origin (CSRF) guard. Non-safe requests (POST/PUT/PATCH/DELETE)
+      # are only accepted when the browser Origin/Referer matches one of these.
+      # The guard never trusts the request's own Host header.
+      MR_FRONTEND_ORIGIN: "http://localhost:8080"
+      # Comma-separated extra trusted origins (e.g. a reverse-proxy host):
+      # HELIX_ALLOWED_ORIGINS: "https://music.example.com,http://192.168.1.50:8080"
+
       # Custom station providers are trusted Python code.
       # Only enable this if you trust every .py file in ./custom_stations.
       HELIX_ENABLE_CUSTOM_STATION_TYPES: "false"

@@ -82,17 +82,14 @@ class OriginGuardMiddleware(BaseHTTPMiddleware):
         if request.method.upper() not in self.SAFE_METHODS:
             origin = request.headers.get("origin")
             referer = request.headers.get("referer")
+            # Allowed origins come only from configuration. Deriving them from the
+            # request's own Host header let a client send Host: attacker.com with a
+            # matching Origin and bypass the CSRF guard, so Host is never used here.
             allowed = {FRONTEND_ORIGIN.rstrip("/")}
             for extra in (os.getenv("HELIX_ALLOWED_ORIGINS", "") or "").split(","):
                 extra = extra.strip().rstrip("/")
                 if extra:
                     allowed.add(extra)
-            request_host = (request.headers.get('host', '') or '').strip()
-            if request_host:
-                allowed.add(f"http://{request_host}".rstrip("/"))
-                allowed.add(f"https://{request_host}".rstrip("/"))
-            host_origin = f"{request.url.scheme}://{request_host}".rstrip("/")
-            allowed.add(host_origin)
             candidate = (origin or "").rstrip("/")
             if not candidate and referer:
                 try:
