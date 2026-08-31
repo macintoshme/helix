@@ -9,7 +9,7 @@ from ..db import get_db
 from ..models import User, SessionToken
 from ..api_schemas.auth import ChangePasswordRequest, LoginRequest, MeResponse, SetupRequest
 from ..services.accounts import authenticate_user, create_initial_admin, setup_enabled as setup_is_enabled
-from ..rate_limit import RATE_LIMITER
+from ..rate_limit import RATE_LIMITER, client_ip
 from ..security import hash_password, verify_password
 
 router = APIRouter(tags=["auth"])
@@ -18,8 +18,9 @@ COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
-    return forwarded or getattr(getattr(request, "client", None), "host", "") or ""
+    # Key on the transport peer address by default; X-Forwarded-For is only
+    # trusted when HELIX_TRUST_PROXY is explicitly set.
+    return client_ip(request)
 
 
 def _set_session_cookie(response: Response, token: str) -> None:

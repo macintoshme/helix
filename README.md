@@ -200,6 +200,11 @@ services:
       # Comma-separated extra trusted origins (e.g. a reverse-proxy host):
       # HELIX_ALLOWED_ORIGINS: "https://music.example.com,http://192.168.1.50:8080"
 
+      # Rate limits key on the socket's client address (not spoofable). Set to
+      # "true" only when Helix is directly behind a reverse proxy you trust to
+      # set X-Forwarded-For.
+      # HELIX_TRUST_PROXY: "false"
+
       # Custom station providers are trusted Python code.
       # Only enable this if you trust every .py file in ./custom_stations.
       HELIX_ENABLE_CUSTOM_STATION_TYPES: "false"
