@@ -76,6 +76,42 @@ class FixedWindowRateLimiter:
                 self._buckets.popitem(last=False)
             return True
 
+    def failures(self, key: str, *, window_s: int) -> int:
+        """Return the number of recorded events for ``key`` in the current window.
+
+        Read-only; does not create or mutate the bucket. Used to implement
+        lockout/backoff that trips after N recorded failures.
+        """
+        k = key or ""
+        if not k:
+            return 0
+        with self._lock:
+            w = self._buckets.get(k)
+            if not w or (time.time() - w.start) >= window_s:
+                return 0
+            return w.count
+
+    def record(self, key: str, *, window_s: int) -> None:
+        """Record an event for ``key`` without enforcing any limit.
+
+        Increments the current window (creating it if needed). Pair with
+        ``failures()`` to implement "block after N failures" logic.
+        """
+        now = time.time()
+        k = key or ""
+        if not k:
+            return
+        with self._lock:
+            w = self._buckets.get(k)
+            if w is not None:
+                self._buckets.move_to_end(k)
+            if not w or (now - w.start) >= window_s:
+                self._buckets[k] = _Window(start=now, count=1)
+            else:
+                w.count += 1
+            if len(self._buckets) > _MAX_KEYS:
+                self._buckets.popitem(last=False)
+
     def _prune_locked(self, now: float, max_age_s: int) -> None:
         dead = []
         for k, w in self._buckets.items():

@@ -59,6 +59,7 @@ from ..routers.search import (
     _search_subsonic_only,
     _ytmusic_search,
 )
+from ..rate_limit import client_ip
 from ..realtime import schedule_lobby_state_broadcast
 from ..lobby_station import fill_lobby_station, schedule_lobby_station_fill
 from ..stations_engine import StationGenerationError, StationSeedArtistNotFound
@@ -646,7 +647,7 @@ def list_host_lobbies(db: Session = Depends(get_db), user: User = Depends(get_cu
 
 
 @router.post("/join", response_model=LobbyJoinResponse)
-def join_lobby(payload: LobbyJoinRequest, response: Response, db: Session = Depends(get_db)):
+def join_lobby(payload: LobbyJoinRequest, response: Response, request: Request, db: Session = Depends(get_db)):
     invite = _clean_text(payload.invite_code, 128).upper()
     nickname = _clean_text(payload.nickname, 80)
     if not re.fullmatch(r"[A-Z]{5}", invite):
@@ -654,13 +655,28 @@ def join_lobby(payload: LobbyJoinRequest, response: Response, db: Session = Depe
     if not nickname:
         raise HTTPException(status_code=400, detail="nickname is required")
 
+    # Brute-force protection for the join-by-code path. The invite code space
+    # (5 uppercase letters) is small enough to guess, so join attempts are
+    # throttled per client IP, and repeated failures trigger a short lockout.
+    ip = client_ip(request)
+    if not SEARCH_RATE_LIMITER.allow(f"lobby-join:ip:{ip}", limit=20, window_s=60):
+        raise HTTPException(status_code=429, detail="Too many join attempts, slow down")
+    if SEARCH_RATE_LIMITER.failures(f"lobby-join:lock:{ip}", window_s=60 * 10) >= 10:
+        raise HTTPException(status_code=429, detail="Too many failed join attempts, try again later")
+
     lobby = db.execute(select(SharedLobby).where(SharedLobby.invite_code == invite)).scalar_one_or_none()
+    # Every failure is answered identically (404, same body) so that code- or
+    # password-guessing reveals nothing about whether a code exists, whether the
+    # lobby is open, or whether a supplied password is wrong. Only the rate
+    # limiters above surface as a distinct 429.
     if not lobby or not lobby.is_open:
-        raise HTTPException(status_code=404, detail="Lobby not found or closed")
+        SEARCH_RATE_LIMITER.record(f"lobby-join:lock:{ip}", window_s=60 * 10)
+        raise HTTPException(status_code=404, detail="Lobby not found")
     if lobby.password_hash:
         supplied_password = payload.password or ""
         if not supplied_password or not verify_password(supplied_password, lobby.password_hash):
-            raise HTTPException(status_code=403, detail="Incorrect lobby password")
+            SEARCH_RATE_LIMITER.record(f"lobby-join:lock:{ip}", window_s=60 * 10)
+            raise HTTPException(status_code=404, detail="Lobby not found")
 
     member = SharedLobbyMember(
         lobby_id=lobby.id,
