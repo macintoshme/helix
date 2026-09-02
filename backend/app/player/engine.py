@@ -2745,7 +2745,10 @@ async def _stream_subsonic_with_range(request: Request, cur: QueueItem, *, setti
         # Instead, keep the upstream connection open for the lifetime of the downstream
         # StreamingResponse by managing close() in the generator.
 
-        h = httpx.AsyncClient(timeout=None)
+        # Finite timeouts: a hung Subsonic/Navidrome must not hold the upstream
+        # socket open forever. read=120s bounds the gap between streamed chunks;
+        # connect=10s bounds the initial handshake.
+        h = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
         req = h.build_request("GET", url, params=params, headers=headers_in)
         r = await h.send(req, stream=True)
         try:
@@ -2780,6 +2783,11 @@ async def _stream_subsonic_with_range(request: Request, cur: QueueItem, *, setti
             try:
                 async for chunk in r.aiter_bytes():
                     yield chunk
+            except Exception as e:
+                # Mid-stream failure (e.g. read timeout after 120s without data).
+                # The 200 + headers are already on the wire, so we can only stop
+                # cleanly and log; the client sees a truncated stream.
+                LOG.warning("[stream] subsonic upstream error/timeout: %s", e)
             finally:
                 try:
                     await r.aclose()
