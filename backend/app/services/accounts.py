@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import User, SessionToken
+from ..models import User, SessionToken, SetupClaim
 from ..security import hash_password, verify_password, new_session_token
 
 
@@ -17,16 +18,30 @@ def setup_enabled(db: Session) -> bool:
     return user_count(db) == 0
 
 
-def create_initial_admin(db: Session, *, username: str, password: str) -> tuple[User, str]:
-    """Create the first admin user and session token."""
-    user = User(username=username, password_hash=hash_password(password), role="admin", is_active=True)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+class SetupConflict(Exception):
+    """Raised when two concurrent first-admin setups race and this one loses."""
 
-    token = new_session_token()
-    db.add(SessionToken(token=token, user_id=user.id))
-    db.commit()
+
+def create_initial_admin(db: Session, *, username: str, password: str) -> tuple[User, str]:
+    """Create the first admin user and session token.
+
+    The single-row SetupClaim is inserted in the same transaction as the user,
+    so only one of two concurrent /setup calls can win the claim. The loser hits
+    the primary-key conflict, rolls back (no partial admin), and raises
+    SetupConflict so the caller can respond 409.
+    """
+    try:
+        db.add(SetupClaim(marker="first_admin"))
+        user = User(username=username, password_hash=hash_password(password), role="admin", is_active=True)
+        db.add(user)
+        db.flush()
+        token = new_session_token()
+        db.add(SessionToken(token=token, user_id=user.id))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise SetupConflict("Setup already completed")
+    db.refresh(user)
     return user, token
 
 

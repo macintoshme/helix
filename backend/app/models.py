@@ -38,6 +38,20 @@ class SessionToken(Base):
     user: Mapped["User"] = relationship("User", back_populates="sessions")
 
 
+class SetupClaim(Base):
+    """Single-row claim that makes first-admin setup atomic.
+
+    Only one row (marker='first_admin') can ever exist. Two concurrent
+    ``/setup`` requests that both see "no users yet" will race to insert it;
+    the winner commits, the loser hits the primary-key conflict. This closes
+    the check-then-create TOCTOU that let two admins be created.
+    """
+    __tablename__ = "setup_claims"
+
+    marker: Mapped[str] = mapped_column(String(32), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class Setting(Base):
     __tablename__ = "settings"
 

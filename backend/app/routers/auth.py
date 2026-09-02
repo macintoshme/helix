@@ -8,7 +8,12 @@ from ..auth import SESSION_COOKIE, cookie_secure, get_current_user
 from ..db import get_db
 from ..models import User, SessionToken
 from ..api_schemas.auth import ChangePasswordRequest, LoginRequest, MeResponse, SetupRequest
-from ..services.accounts import authenticate_user, create_initial_admin, setup_enabled as setup_is_enabled
+from ..services.accounts import (
+    SetupConflict,
+    authenticate_user,
+    create_initial_admin,
+    setup_enabled as setup_is_enabled,
+)
 from ..rate_limit import RATE_LIMITER, client_ip
 from ..security import hash_password, verify_password
 
@@ -44,7 +49,11 @@ def setup(payload: SetupRequest, response: Response, db: Session = Depends(get_d
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
 
-    user, token = create_initial_admin(db, username=payload.username, password=payload.password)
+    try:
+        user, token = create_initial_admin(db, username=payload.username, password=payload.password)
+    except SetupConflict:
+        raise HTTPException(status_code=409, detail="Setup is already complete")
+
     _set_session_cookie(response, token)
     return MeResponse(id=user.id, username=user.username, role=user.role)
 
