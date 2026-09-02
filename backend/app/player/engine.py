@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, func, or_, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from ..auth import get_current_user
+from ..auth import get_current_user, require_admin
 from ..db import get_db, SessionLocal
 from ..models import User, PlaybackSession, QueueItem, ListenHistoryItem, Station, Playlist, PlaylistTrack, LikedTrack
 from ..api_schemas.player import PlayerPlayAlbumRequest, PlayerPlayPlaylistRequest, PlayerPlayTrackRequest, PlayerJumpRequest, PlayerQueueItem, PlayerStateResponse, PlayerQueueAppendTrackRequest, PlayerQueueAppendAlbumRequest, PlayerQueueReorderRequest, PlayerRemoveQueueItemResponse, PlayerHistoryItem, PlayerHistoryResponse, PlayerActionRequest, PlayerReplayRequest, AutoplaySetRequest
@@ -1899,9 +1899,12 @@ def history(
     )
 
 
-def history_set_limit(payload: Dict[str, Any], db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def history_set_limit(payload: Dict[str, Any], db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     # Backward-compatible endpoint: old clients used this to control both display
     # length and retention. It now controls retention only; API display is paginated.
+    # This mutates the *global* listen_history_retention setting, which caps
+    # history for every user — so it is admin-only (a normal user hitting it could
+    # wipe/prune everyone's history).
     try:
         retention = int(payload.get("limit") or payload.get("retention") or 10000)
     except Exception:
@@ -1909,7 +1912,7 @@ def history_set_limit(payload: Dict[str, Any], db: Session = Depends(get_db), us
     retention = max(0, min(50000, retention))
     from ..settings_store import patch_settings
     patch_settings(db, {"listen_history_retention": retention})
-    return history(limit=100, offset=0, db=db, user=user)
+    return history(limit=100, offset=0, db=db, user=admin)
 
 
 async def ended(payload: Optional[PlayerActionRequest] = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
