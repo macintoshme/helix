@@ -23,6 +23,7 @@ from ..db import get_db, SessionLocal
 from ..models import User, PlaybackSession, QueueItem, ListenHistoryItem, Station, Playlist, PlaylistTrack, LikedTrack
 from ..api_schemas.player import PlayerPlayAlbumRequest, PlayerPlayPlaylistRequest, PlayerPlayTrackRequest, PlayerJumpRequest, PlayerQueueItem, PlayerStateResponse, PlayerQueueAppendTrackRequest, PlayerQueueAppendAlbumRequest, PlayerQueueReorderRequest, PlayerRemoveQueueItemResponse, PlayerHistoryItem, PlayerHistoryResponse, PlayerActionRequest, PlayerReplayRequest, AutoplaySetRequest
 from ..settings_store import get_settings
+from ..rate_limit import RATE_LIMITER, make_key
 from ..user_settings_store import station_queue_ahead_for_user, queue_add_position_for_user
 from ..integrations.subsonic import SubsonicClient
 from ..integrations.ytmusic import get_album_full, find_track
@@ -37,6 +38,38 @@ LOG = logging.getLogger("helix.player")
 
 HELIX_PROGRESSIVE_MIN_BYTES = int(os.getenv("HELIX_PROGRESSIVE_MIN_BYTES", "262144"))
 HELIX_PROGRESSIVE_STREAMING = str(os.getenv("HELIX_PROGRESSIVE_STREAMING", "false") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+# Per-user rate limits for the I/O-heavy player routes. Album/playlist
+# resolution performs external network I/O (ytmusic/Subsonic); leaving these
+# unthrottled lets a single user drive sustained outbound traffic and queue
+# growth. Keyed per user (not IP) so the limits track an authenticated account.
+_PLAYER_PLAY_WINDOW_S = 60
+_PLAYER_PLAY_LIMIT = 10        # play_album / play_playlist
+_PLAYER_APPEND_WINDOW_S = 60
+_PLAYER_APPEND_LIMIT = 30      # queue_append_track / queue_append_album
+
+
+def _check_player_rate_limit(user: User, *, scope: str, limit: int, window_s: int) -> None:
+    """Raise 429 if ``user`` exceeds the per-user ``scope`` budget."""
+    if not RATE_LIMITER.allow(make_key(scope=scope, user_id=user.id, ip=""), limit=limit, window_s=window_s):
+        raise HTTPException(status_code=429, detail="Too many requests, please slow down.")
+
+
+def _enforce_queue_cap(db: Session, user_id: str, adding: int, settings: Dict[str, Any]) -> None:
+    """Raise 400 if appending ``adding`` items would exceed player_max_queue_items.
+
+    A non-positive setting disables the cap (matches the setting being able to be
+    cleared). This bounds a single user's queue so appends cannot grow it without
+    limit.
+    """
+    max_items = _infer_int(settings.get("player_max_queue_items"), 0) or 0
+    if max_items <= 0:
+        return
+    current = db.execute(
+        select(func.count()).select_from(QueueItem).where(QueueItem.session_user_id == user_id)
+    ).scalar_one()
+    if int(current or 0) + adding > max_items:
+        raise HTTPException(status_code=400, detail=f"Queue is full (max {max_items} items).")
 
 
 def _browser_audio_media_type(path: str) -> str:
@@ -1248,6 +1281,7 @@ async def play_album(payload: PlayerPlayAlbumRequest, user: User = Depends(get_c
     This endpoint must never hold a DB session across slow external calls.
     """
     settings = _load_settings_short()
+    _check_player_rate_limit(user, scope="player:play_album", limit=_PLAYER_PLAY_LIMIT, window_s=_PLAYER_PLAY_WINDOW_S)
 
     browse_id = _clean(payload.browse_id)
     if not browse_id:
@@ -1381,6 +1415,7 @@ async def play_playlist(payload: PlayerPlayPlaylistRequest, user: User = Depends
     in one DB transaction so playback reliably advances beyond track 1.
     """
     settings = _load_settings_short()
+    _check_player_rate_limit(user, scope="player:play_playlist", limit=_PLAYER_PLAY_LIMIT, window_s=_PLAYER_PLAY_WINDOW_S)
     pid = _clean(payload.playlist_id)
 
     db = SessionLocal()
@@ -1562,6 +1597,7 @@ async def play_playlist(payload: PlayerPlayPlaylistRequest, user: User = Depends
 
 async def queue_append_track(payload: PlayerQueueAppendTrackRequest, user: User = Depends(get_current_user)):
     settings = _load_settings_short()
+    _check_player_rate_limit(user, scope="player:queue_append_track", limit=_PLAYER_APPEND_LIMIT, window_s=_PLAYER_APPEND_WINDOW_S)
 
     title = _clean(payload.title)
     artist = _clean(payload.artist)
@@ -1575,6 +1611,7 @@ async def queue_append_track(payload: PlayerQueueAppendTrackRequest, user: User 
 
     db = SessionLocal()
     try:
+        _enforce_queue_cap(db, user.id, adding=1, settings=settings)
         item = QueueItem(
             kind="song",
             title=title,
@@ -1607,6 +1644,7 @@ async def queue_append_track(payload: PlayerQueueAppendTrackRequest, user: User 
 
 async def queue_append_album(payload: PlayerQueueAppendAlbumRequest, user: User = Depends(get_current_user)):
     settings = _load_settings_short()
+    _check_player_rate_limit(user, scope="player:queue_append_album", limit=_PLAYER_APPEND_LIMIT, window_s=_PLAYER_APPEND_WINDOW_S)
     browse_id = _clean(payload.browse_id)
     if not browse_id:
         raise HTTPException(status_code=400, detail="browse_id is required")
@@ -1653,6 +1691,7 @@ async def queue_append_album(payload: PlayerQueueAppendAlbumRequest, user: User 
         if not items_to_add:
             raise HTTPException(status_code=404, detail="No playable tracks found for this album on YouTube Music.")
 
+        _enforce_queue_cap(db, user.id, adding=len(items_to_add), settings=settings)
         if queue_add_position_for_user(db, user.id) == "next":
             _insert_queue_items_after_current_with_sqlite_lock(db, user.id, items_to_add)
         else:
