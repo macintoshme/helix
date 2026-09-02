@@ -822,6 +822,13 @@ def lobby_state(lobby_id: str, request: Request, db: Session = Depends(get_db)):
     db.commit()
     return response
 
+# Upper bound for a proxied lobby artwork body. The remote art fetch is already
+# constrained to https + a host allow-list with redirects disabled; the cap is
+# defense-in-depth so an allow-listed CDN can never stream an unbounded body
+# into memory.
+_LOBBY_ART_MAX_BYTES = 10 * 1024 * 1024
+
+
 @router.get("/{lobby_id}/art/{item_id}")
 async def lobby_item_art(lobby_id: str, item_id: str, request: Request):
     """Serve lobby artwork through a lobby-scoped endpoint.
@@ -927,14 +934,22 @@ async def lobby_item_art(lobby_id: str, item_id: str, request: Request):
 
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
-            resp = await client.get(raw_url)
-            resp.raise_for_status()
-            data = resp.content
-            return Response(
-                content=data,
-                media_type=_guess_image_content_type(data, resp.headers.get("content-type", "")),
-                headers={"Cache-Control": "public, max-age=86400"},
-            )
+            async with client.stream("GET", raw_url) as resp:
+                resp.raise_for_status()
+                ctype = resp.headers.get("content-type", "")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _LOBBY_ART_MAX_BYTES:
+                        raise HTTPException(status_code=404, detail="Artwork too large")
+                    chunks.append(chunk)
+                data = b"".join(chunks)
+                return Response(
+                    content=data,
+                    media_type=_guess_image_content_type(data, ctype),
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
     except HTTPException:
         raise
     except Exception as exc:
