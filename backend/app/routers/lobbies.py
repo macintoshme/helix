@@ -673,7 +673,7 @@ def join_lobby(payload: LobbyJoinRequest, response: Response, db: Session = Depe
     db.add(member)
     db.commit()
     db.refresh(member)
-    response.set_cookie(LOBBY_TOKEN_COOKIE, member.token or "", httponly=False, samesite="lax", secure=cookie_secure())
+    response.set_cookie(LOBBY_TOKEN_COOKIE, member.token or "", httponly=True, samesite="lax", secure=cookie_secure())
     return LobbyJoinResponse(
         guest_token=member.token or "",
         member=_to_member_response(member),
