@@ -1,11 +1,10 @@
 # frontend build
-FROM node:20-slim AS frontend-build
+FROM node:20.20.2-slim AS frontend-build
 
 WORKDIR /frontend
 
 COPY frontend/package*.json ./
-RUN npm install
-RUN npm install -D @types/react @types/react-dom
+RUN npm ci
 
 COPY frontend ./
 RUN npm run build
