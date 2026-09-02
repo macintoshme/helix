@@ -518,6 +518,36 @@ async def _prefetch_next_station_item(user_id: str, station_id: str) -> None:
 def _clean(s: str) -> str:
     return " ".join((s or "").strip().split())
 
+
+# YouTube browse IDs (albums OLAK5…, playlists PL…, mixes RDAM…) are short
+# URL-safe tokens. Bounding the charset/length rejects malformed input before it
+# reaches the ytmusic fetcher.
+_YT_BROWSE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _require_valid_yt_video_id_or_400(value: Optional[str]) -> str:
+    """Clean a user-supplied yt_video_id; reject a malformed non-empty value.
+
+    Empty is allowed — the item is resolved later / marked NOT_IN_LIBRARY. A
+    non-empty value must be a valid 11-char YT id or the request is rejected
+    (400), so junk cannot be stored and later interpolated into stream URLs.
+    """
+    v = _clean(value or "")
+    if v and not is_valid_yt_video_id(v):
+        raise HTTPException(status_code=400, detail="Invalid yt_video_id")
+    return v
+
+
+def _require_valid_browse_id_or_400(value: Optional[str]) -> str:
+    """Clean a user-supplied browse_id; reject empty or malformed values (400)."""
+    v = _clean(value or "")
+    if not v:
+        raise HTTPException(status_code=400, detail="browse_id is required")
+    if not _YT_BROWSE_ID_RE.match(v):
+        raise HTTPException(status_code=400, detail="Invalid browse_id")
+    return v
+
+
 def _yt_video_id_from_key(key: Any) -> str:
     """Recover a YouTube video id from legacy stable identity keys.
 
@@ -1224,7 +1254,7 @@ async def play_track(payload: PlayerPlayTrackRequest, user: User = Depends(get_c
     album = _clean(payload.album or "")
     duration_ms = _infer_int(payload.duration_ms, 0)
     art_url = _clean(payload.art_url or "")
-    yt_video_id = _clean(getattr(payload, "yt_video_id", None) or "")
+    yt_video_id = _require_valid_yt_video_id_or_400(getattr(payload, "yt_video_id", None))
 
     # External I/O first (bounded): resolve against Subsonic only when configured.
     song = await _try_match_subsonic_song(settings, title=title, artist=artist, duration_ms=duration_ms or None)
@@ -1283,9 +1313,7 @@ async def play_album(payload: PlayerPlayAlbumRequest, user: User = Depends(get_c
     settings = _load_settings_short()
     _check_player_rate_limit(user, scope="player:play_album", limit=_PLAYER_PLAY_LIMIT, window_s=_PLAYER_PLAY_WINDOW_S)
 
-    browse_id = _clean(payload.browse_id)
-    if not browse_id:
-        raise HTTPException(status_code=400, detail="browse_id is required")
+    browse_id = _require_valid_browse_id_or_400(payload.browse_id)
 
     # External I/O first (bounded).
     full = await _ytmusic_album_full_with_timeout(
@@ -1604,7 +1632,7 @@ async def queue_append_track(payload: PlayerQueueAppendTrackRequest, user: User 
     album = _clean(payload.album or "")
     duration_ms = _infer_int(payload.duration_ms, 0)
     art_url = _clean(payload.art_url or "")
-    yt_video_id = _clean(getattr(payload, "yt_video_id", None) or "")
+    yt_video_id = _require_valid_yt_video_id_or_400(getattr(payload, "yt_video_id", None))
 
     # External I/O first (bounded): resolve against Subsonic only when configured.
     song = await _try_match_subsonic_song(settings, title=title, artist=artist, duration_ms=duration_ms or None)
@@ -1645,9 +1673,7 @@ async def queue_append_track(payload: PlayerQueueAppendTrackRequest, user: User 
 async def queue_append_album(payload: PlayerQueueAppendAlbumRequest, user: User = Depends(get_current_user)):
     settings = _load_settings_short()
     _check_player_rate_limit(user, scope="player:queue_append_album", limit=_PLAYER_APPEND_LIMIT, window_s=_PLAYER_APPEND_WINDOW_S)
-    browse_id = _clean(payload.browse_id)
-    if not browse_id:
-        raise HTTPException(status_code=400, detail="browse_id is required")
+    browse_id = _require_valid_browse_id_or_400(payload.browse_id)
 
     full = await _ytmusic_album_full_with_timeout(
         browse_id,
