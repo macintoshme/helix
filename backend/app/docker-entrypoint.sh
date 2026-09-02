@@ -16,7 +16,7 @@ ytdlp_version() {
     python -c 'import yt_dlp; print(yt_dlp.version.__version__)' 2>/dev/null || printf '%s' 'unknown'
 }
 
-AUTO_UPDATE="${HELIX_YTDLP_AUTO_UPDATE:-true}"
+AUTO_UPDATE="${HELIX_YTDLP_AUTO_UPDATE:-false}"
 CHANNEL="$(printf '%s' "${HELIX_YTDLP_CHANNEL:-stable}" | tr '[:upper:]' '[:lower:]')"
 
 if bool_enabled "$AUTO_UPDATE"; then
@@ -32,7 +32,7 @@ if bool_enabled "$AUTO_UPDATE"; then
             fi
             ;;
         nightly)
-            if python -m pip install --disable-pip-version-check --no-cache-dir --upgrade --pre 'yt-dlp[default]'; then
+            if python -m pip install --disable-pip-version-check --no-cache-dir --upgrade 'yt-dlp[default]'; then
                 log "yt-dlp ready: $(ytdlp_version) (nightly channel)"
             else
                 log "WARNING: yt-dlp nightly update failed; continuing with bundled/current version ${BEFORE}. YouTube playback or downloads may fail if this version is stale."
