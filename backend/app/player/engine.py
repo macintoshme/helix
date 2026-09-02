@@ -1954,38 +1954,50 @@ def history_set_limit(payload: Dict[str, Any], db: Session = Depends(get_db), ad
     return history(limit=100, offset=0, db=db, user=admin)
 
 
-async def ended(payload: Optional[PlayerActionRequest] = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    settings = get_settings(db)
-    sess = _get_or_create_session(db, user.id)
-    items = db.execute(select(QueueItem).where(QueueItem.session_user_id == user.id).order_by(QueueItem.position.asc())).scalars().all()
-    cur = items[sess.current_index] if 0 <= sess.current_index < len(items) else None
-    played_ms = 0
-    if payload and payload.position_ms is not None:
-        played_ms = int(payload.position_ms or 0)
-    _push_history(db, user.id, cur, event="completed", reason="ended", played_ms=played_ms, settings=settings)
+async def ended(payload: Optional[PlayerActionRequest] = None, user: User = Depends(get_current_user)):
+    # DB burst: advance index + snapshot autoplay inputs, then release the
+    # session before the slow station-generation await below (see next_track).
+    db = SessionLocal()
+    try:
+        settings = get_settings(db)
+        sess = _get_or_create_session(db, user.id)
+        items = db.execute(select(QueueItem).where(QueueItem.session_user_id == user.id).order_by(QueueItem.position.asc())).scalars().all()
+        cur = items[sess.current_index] if 0 <= sess.current_index < len(items) else None
+        played_ms = int(payload.position_ms or 0) if payload and payload.position_ms is not None else 0
+        _push_history(db, user.id, cur, event="completed", reason="ended", played_ms=played_ms, settings=settings)
 
-    # advance
-    if sess.current_index + 1 < len(items):
-        sess.current_index += 1
-        sess.is_playing = True
+        # advance
+        if sess.current_index + 1 < len(items):
+            sess.current_index += 1
+            sess.is_playing = True
+            db.commit()
+            return _changed_state(db=db, user=user)
+
+        # End of queue: snapshot autoplay inputs, then release the session.
+        active_station_id = str(getattr(sess, "active_station_id", "") or "")
+        autoplay_enabled = bool(getattr(sess, "autoplay_enabled", True))
+        sess.is_playing = False
         db.commit()
-        return _changed_state(db=db, user=user)
+    finally:
+        db.close()
 
-    # End of queue: optionally autoplay from the active station.
-    sess.is_playing = False
-    db.commit()
-
-    if bool(getattr(sess, "autoplay_enabled", True)) and (getattr(sess, "active_station_id", "") or ""):
+    # External I/O: station autoplay without holding the DB session.
+    if autoplay_enabled and active_station_id:
         try:
             await generate_and_append_station_track(
                 user.id,
-                str(getattr(sess, "active_station_id", "") or ""),
+                active_station_id,
                 settings=settings,
                 advance_to_new_item=True,
             )
         except Exception as e:
             LOG.warning("autoplay append failed: %s", e)
-    return _changed_state(db=db, user=user)
+
+    db = SessionLocal()
+    try:
+        return _changed_state(db=db, user=user)
+    finally:
+        db.close()
 
 
 def jump_to(payload: PlayerJumpRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
