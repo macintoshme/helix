@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
 
@@ -285,6 +285,58 @@ def _pandora_playlist_id(url: str) -> str:
     return match.group(1) if match else ""
 
 
+# SSRF guard for the Pandora importer. Only Pandora's own share host may be
+# fetched server-side; anything else (private/loopback/link-local, an attacker
+# host, or a redirect that bounces to one) is rejected.
+_PANDORA_ALLOWED_HOSTS = frozenset({"www.pandora.com"})
+_PANDORA_MAX_REDIRECTS = 5
+_PANDORA_MAX_BODY_BYTES = 10 * 1024 * 1024
+
+
+def _assert_pandora_url(url: str) -> None:
+    """Raise ValueError unless ``url`` is https on an allowed Pandora host.
+
+    Must be called on the initial share URL *and* on every redirect hop before
+    it is fetched, so a user-supplied URL (or a redirect it issues) can never
+    make the server reach an internal/private address.
+    """
+    try:
+        parsed = urlparse(url or "")
+    except (ValueError, TypeError):
+        raise ValueError("Pandora could not open this shared playlist.")
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() not in _PANDORA_ALLOWED_HOSTS:
+        raise ValueError("Pandora could not open this shared playlist.")
+
+
+async def _fetch_pandora_share(client: httpx.AsyncClient, url: str) -> httpx.Response:
+    """GET the Pandora share page, following redirects manually.
+
+    Redirects are handled hop-by-hop (at most ``_PANDORA_MAX_REDIRECTS``) and
+    every hop is validated against the host allow-list, so the server never
+    fetches an address the user did not authorize. The final body is size-capped.
+    """
+    current = url
+    _assert_pandora_url(current)
+    for _ in range(_PANDORA_MAX_REDIRECTS + 1):
+        response = await client.get(
+            current,
+            headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+        )
+        if response.is_redirect:
+            location = response.headers.get("location") or ""
+            await response.aclose()
+            if not location:
+                raise ValueError("Pandora could not open this shared playlist.")
+            current = urljoin(current, location)
+            _assert_pandora_url(current)
+            continue
+        if len(response.content) > _PANDORA_MAX_BODY_BYTES:
+            await response.aclose()
+            raise ValueError("Pandora share page is too large to import.")
+        return response
+    raise ValueError("Pandora share page redirected too many times.")
+
+
 async def parse_pandora_playlist_url(url: str) -> tuple[str, Optional[int], List[ImportedTrack]]:
     pandora_id = _pandora_playlist_id(url)
     if not pandora_id:
@@ -394,14 +446,14 @@ async def parse_pandora_playlist_url(url: str) -> tuple[str, Optional[int], List
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    async with httpx.AsyncClient(timeout=25, follow_redirects=True, headers=browser_headers) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False, headers=browser_headers) as client:
         # Visiting the public share page initializes Pandora's cookie jar,
         # including the CSRF token used by its same-origin REST calls.
+        # Redirects are followed manually and every hop is validated against the
+        # Pandora host allow-list, so a user-supplied URL (or a redirect it
+        # issues) can never make the server fetch an internal/private address.
         try:
-            share_response = await client.get(
-                share_url,
-                headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
-            )
+            share_response = await _fetch_pandora_share(client, share_url)
         except httpx.HTTPError as exc:
             raise ValueError("Pandora could not open this shared playlist.") from exc
         if share_response.status_code >= 400:
@@ -413,7 +465,11 @@ async def parse_pandora_playlist_url(url: str) -> tuple[str, Optional[int], List
             # Hitting the site root is enough to establish the same anonymous
             # browser cookie without involving a user login.
             try:
-                await client.get("https://www.pandora.com/", headers={"Accept": "text/html,application/xhtml+xml"})
+                await client.get(
+                    "https://www.pandora.com/",
+                    headers={"Accept": "text/html,application/xhtml+xml"},
+                    follow_redirects=True,
+                )
             except httpx.HTTPError:
                 pass
             csrf_token = client.cookies.get("csrftoken")
@@ -436,6 +492,7 @@ async def parse_pandora_playlist_url(url: str) -> tuple[str, Optional[int], List
                 anonymous_login_endpoint,
                 json={},
                 headers={**common_api_headers, "X-AuthToken": PANDORA_WEB_BOOTSTRAP_AUTH},
+                follow_redirects=True,
             )
         except httpx.HTTPError as exc:
             raise ValueError("Pandora could not create an anonymous session for this playlist.") from exc
@@ -481,6 +538,7 @@ async def parse_pandora_playlist_url(url: str) -> tuple[str, Optional[int], List
                     tracks_endpoint,
                     json=request_payload,
                     headers={**common_api_headers, "X-AuthToken": anonymous_auth_token},
+                    follow_redirects=True,
                 )
             except httpx.HTTPError as exc:
                 raise ValueError("Pandora could not read this shared playlist.") from exc
