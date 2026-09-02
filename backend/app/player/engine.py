@@ -1741,7 +1741,7 @@ def queue_remove_item(queue_item_id: str, db: Session = Depends(get_db), user: U
     if idx == sess.current_index:
         _push_history(db, user.id, items[idx], event="skipped", reason="removed_current", played_ms=0, settings=settings)
 
-    db.execute(delete(QueueItem).where(QueueItem.id == queue_item_id))
+    db.execute(delete(QueueItem).where(QueueItem.id == queue_item_id, QueueItem.session_user_id == user.id))
     db.commit()
 
     # Re-fetch and reindex positions
