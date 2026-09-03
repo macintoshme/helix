@@ -1,0 +1,26 @@
+# --- VCS / CI (not needed in the image; .git also hides full history) ---
+.git
+.github
+.gitignore
+
+# --- Secrets / local env: never send these to the image builder ---
+.env
+*.env
+*.pem
+*.key
+
+# --- Node: rebuilt inside the image via `npm install` ---
+frontend/node_modules
+frontend/dist
+
+# --- Python build artifacts ---
+**/__pycache__
+**/*.pyc
+
+# --- Docs / charts / example config: not part of the runtime image ---
+*.md
+docs
+helm
+beets_config
+docker-compose-example.yml
+.dockerignore
