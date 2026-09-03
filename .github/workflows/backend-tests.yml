@@ -1,0 +1,44 @@
+name: backend-tests
+
+on:
+  push:
+    branches: [main, "fix/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HELIX_YTDLP_AUTO_UPDATE: "false"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Match the production runtime (Dockerfile uses python:3.11-slim). bcrypt is
+        # pinned at 4.0.1 for passlib compatibility and does not ship cp312 wheels,
+        # so we intentionally test only the 3.11 target here.
+        python-version: ["3.11"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+
+      - name: Run pytest
+        working-directory: backend
+        run: pytest
