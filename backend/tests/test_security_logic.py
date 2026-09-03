@@ -22,7 +22,7 @@ def test_password_wrong_value_rejected():
 
 def test_password_hash_is_bcrypt():
     hashed = hash_password("hello")
-    assert hashed.startswith("$2"), hashed
+    assert hashed.startswith("$bcrypt-sha256$"), hashed
 
 
 def test_rate_limiter_enforces_limit():
