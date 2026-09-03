@@ -38,6 +38,7 @@ from .routers.system import router as system_router
 from .routers.ytmusic import router as ytmusic_router
 from .routers.user_settings import router as user_settings_router
 from .routers.realtime import router as realtime_router
+from .routers.quality_upgrades import router as quality_upgrades_router
 
 logging.basicConfig(
     level=getattr(logging, os.getenv("HELIX_LOG_LEVEL", "INFO").upper(), logging.INFO),
@@ -59,7 +60,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Content-Security-Policy",
             os.getenv(
                 "HELIX_CONTENT_SECURITY_POLICY",
-                "default-src 'self'; img-src 'self' https: data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; script-src 'self' 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU='; script-src-elem 'self' 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU='; style-src 'self' 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'",
+                "default-src 'self'; "
+                "img-src 'self' https: data: blob:; "
+                "media-src 'self' blob:; "
+                "connect-src 'self' ws: wss:; "
+                "script-src 'self' 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU='; "
+                "script-src-elem 'self' 'sha256-ieoeWczDHkReVBsRBqaal5AFMlBtNjMzgwKvLqi/tSU='; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com data:; "
+                "base-uri 'self'; "
+                "frame-ancestors 'none'",
             ),
         )
         return response
@@ -100,7 +110,6 @@ FRONTEND_ORIGIN = os.getenv("MR_FRONTEND_ORIGIN", "http://localhost:8080")
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(OriginGuardMiddleware)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_ORIGIN],
@@ -112,6 +121,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup():
+    # quality_models is imported by the quality router above before init_db(),
+    # so its tables are included in Base.metadata.create_all().
     init_db()
 
     from .realtime import HUB
@@ -120,7 +131,6 @@ def _startup():
     except RuntimeError:
         pass
 
-    # Detect long-held SQLite connections while the app is running.
     try:
         asyncio.get_event_loop().create_task(db_watchdog_loop())
     except Exception:
@@ -136,10 +146,14 @@ def _startup():
         from .lobby_station import lobby_station_monitor_loop
         asyncio.get_event_loop().create_task(lobby_station_monitor_loop())
     except Exception:
-        logging.getLogger(__name__).exception("Failed to start lobby station monitor loop")
+        logging.getLogger(__name__).exception("Failed to start lobby station monitor")
 
-    # Start background download/finalize workers (YouTube Music fulfillment).
-    # The manager still owns the front-of-queue-only download enforcement.
+    try:
+        from .quality_upgrade_service import quality_upgrade_worker_loop
+        asyncio.get_event_loop().create_task(quality_upgrade_worker_loop())
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to start quality upgrade worker")
+
     from .download_manager import DOWNLOAD_MANAGER
     from .settings_store import get_settings
 
@@ -160,7 +174,6 @@ async def _realtime_startup():
     HUB.bind_loop()
 
 
-# API routers are grouped by OpenAPI domain for easier docs navigation.
 app.include_router(system_router)
 app.include_router(auth_router)
 app.include_router(settings_router)
@@ -182,18 +195,16 @@ app.include_router(dislikes_router)
 app.include_router(playlists_router)
 app.include_router(subsonic_router)
 app.include_router(subsonic_add_router)
+app.include_router(quality_upgrades_router)
 app.include_router(realtime_router)
 app.include_router(user_settings_router)
 app.include_router(lyrics_router)
 
 
-# --- Serve frontend (single-container mode) ---
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 class SinglePageAppStaticFiles(StaticFiles):
-    """Serve built frontend assets and fall back to index.html for React routes."""
-
     async def get_response(self, path: str, scope):
         try:
             return await super().get_response(path, scope)

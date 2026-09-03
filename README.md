@@ -122,7 +122,7 @@ Every previewed track is classified as one of the following:
 
 The review screen lets you choose exactly which tracks will be imported. You can also filter down to tracks that need attention and leave **Skip songs already in this playlist** enabled to avoid duplicates.
 
-Playlist importing does **not** automatically download every imported song into Subsonic. Imported playlist entries can play from their resolved source, and individual tracks can still be sent to **Add to Subsonic** separately when fulfillment is enabled.
+Playlist importing does **not** automatically add every imported song to Subsonic. Imported playlist entries can play from their resolved source, and individual tracks can still be sent to **Add to Subsonic** separately when fulfillment is enabled.
 
 ## Important behavior
 
@@ -152,7 +152,7 @@ services:
       # Helix persisted data: database, logs, stream cache, station covers, etc.
       - ./data:/data
 
-      # Inbound download/fulfillment staging
+      # Fulfillment staging
       - ./inbound_yt:/inbound_yt
 
       # Optional: music library root used by Navidrome/Subsonic/beets.
@@ -219,7 +219,7 @@ On first launch, Helix will ask you to create an admin account.
 
 ## yt-dlp updates
 
-Helix relies on `yt-dlp` for YouTube-backed playback and fulfillment. YouTube changes frequently, and an outdated `yt-dlp` can cause playback or downloads to fail even when the rest of Helix is working normally.
+Helix relies on `yt-dlp` for source playback and fulfillment. Source behavior can change frequently, and an outdated `yt-dlp` can cause those features to fail even when the rest of Helix is working normally.
 
 To reduce that failure mode, the Docker image includes a bundled version of `yt-dlp` **and Helix checks for an updated version each time the container starts**. This happens before the Helix application starts, so users do not need to rebuild or pull a new Helix image solely to receive a newer `yt-dlp`.
 
@@ -233,7 +233,7 @@ HELIX_YTDLP_CHANNEL=stable
 `HELIX_YTDLP_CHANNEL` supports:
 
 - `stable` — the latest stable `yt-dlp` release. This is the default.
-- `nightly` — allows pre-release/nightly builds when a YouTube fix has not reached stable yet.
+- `nightly` — allows pre-release/nightly builds when a source fix has not reached stable yet.
 
 Set `HELIX_YTDLP_AUTO_UPDATE=false` if you specifically want to use only the version bundled into the Helix image.
 
@@ -241,7 +241,7 @@ Set `HELIX_YTDLP_AUTO_UPDATE=false` if you specifically want to use only the ver
 
 A failed update **does not prevent Helix from starting**. Helix logs a warning and continues with the version already bundled in the container. This keeps temporary package-index or network outages from taking the entire service down.
 
-However, if that bundled version has become too old for current YouTube behavior, YouTube-backed playback and downloads may fail until `yt-dlp` can be updated. If those features suddenly stop working, check the container startup logs for an entry beginning with `[helix-entrypoint]` before assuming the Helix application itself is broken. Restarting the container when network/package access is available will retry the update; pulling a current Helix image also refreshes the bundled fallback version.
+However, if that bundled version has become too old for the current source behavior, source playback and fulfillment may fail until `yt-dlp` can be updated. If those features suddenly stop working, check the container startup logs for an entry beginning with `[helix-entrypoint]` before assuming the Helix application itself is broken. Restarting the container when network/package access is available will retry the update; pulling a current Helix image also refreshes the bundled fallback version.
 
 Because the update check runs at container startup, restarts may take slightly longer while `pip` checks for or installs a newer `yt-dlp`.
 
